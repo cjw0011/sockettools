@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import locale
 import platform
 import re
 import socket
@@ -69,32 +68,20 @@ def is_windows() -> bool:
 # =========================
 # Subprocess helpers (UTF-8 enforced)
 # =========================
-def run_cmd(cmd: List[str], timeout: int = 30, encoding: Optional[str] = None) -> Tuple[int, str]:
+def run_cmd(cmd: List[str], timeout: int = 30) -> Tuple[int, str]:
     """
-    统一子进程执行：按指定编码解码，默认根据平台动态选择并容错。
+    统一子进程执行：强制按 UTF-8 解码，并容错，避免 GBK 相关报错。
+    """
     try:
-        try:
-            p = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding=encoding,
-                errors="replace",
-                shell=False,
-            )
-        except LookupError:
-            # 某些平台可能不支持 "oem"，回退到本地默认编码
-            fallback = locale.getpreferredencoding(False) if is_windows() else "utf-8"
-            p = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding=fallback,
-                errors="replace",
-                shell=False,
-            )
+        p = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=False,
+        )
         out, _ = p.communicate(timeout=timeout)
         return p.returncode, (out or "").strip()
     except Exception as e:
@@ -122,7 +109,7 @@ def run_powershell_json(ps_script: str, timeout: int = 30) -> Tuple[int, list]:
         "-Command",
         f"{ps_prefix} {ps_script} | ConvertTo-Json -Compress",
     ]
-    code, out = run_cmd(cmd, timeout=timeout, encoding="utf-8")
+    code, out = run_cmd(cmd, timeout=timeout)
     if code != 0 or not out:
         return 1, []
 
@@ -168,7 +155,7 @@ def list_windows_interfaces() -> List[str]:
 
     # 3) netsh 兜底
     if not names:
-        code, out = run_cmd(["netsh", "interface", "ipv4", "show", "interfaces"], encoding=None)
+        code, out = run_cmd(["netsh", "interface", "ipv4", "show", "interfaces"])
         if code == 0 and out:
             for line in out.splitlines():
                 line = line.strip()
@@ -427,7 +414,7 @@ def ping_host(host: str, count: int = 4, timeout_ms: int = 1000, interval_ms: in
         i_s = max(0.2, round(interval_ms / 1000.0, 2))
         cmd = ["ping", "-c", str(count), "-W", str(t_s), "-i", str(i_s), host]
 
-    code, out = run_cmd(cmd, timeout=max(10, count * 5), encoding=None)
+    code, out = run_cmd(cmd, timeout=max(10, count * 5))
     if code != 0 and not out:
         return False, f"Ping 执行失败（{code}）。"
 
@@ -480,35 +467,27 @@ def windows_set_static(
         "netsh", "interface", "ipv4", "set", "address",
         f"name={interface}", "static", ip, mask
     ] + ([gateway, "1"] if gateway else [])
-    code, out = run_cmd(cmd_addr, encoding=None)
+    code, out = run_cmd(cmd_addr)
     if code != 0:
         return False, out or "failed: set address"
 
-    run_cmd(["netsh", "interface", "ipv4", "delete", "dnsservers", f"name={interface}", "all"], encoding=None)
+    run_cmd(["netsh", "interface", "ipv4", "delete", "dnsservers", f"name={interface}", "all"])
     if dns1:
-        code, out1 = run_cmd([
-            "netsh", "interface", "ipv4", "add", "dnsservers",
-            f"name={interface}", f"address={dns1}", "index=1", "validate=no"
-        ], encoding=None)
+        code, out1 = run_cmd(["netsh", "interface", "ipv4", "add", "dnsservers",
+                              f"name={interface}", f"address={dns1}", "index=1", "validate=no"])
         if code != 0:
             return False, out1 or "failed: add dns1"
     if dns2:
-        code, out2 = run_cmd([
-            "netsh", "interface", "ipv4", "add", "dnsservers",
-            f"name={interface}", f"address={dns2}", "index=2", "validate=no"
-        ], encoding=None)
+        code, out2 = run_cmd(["netsh", "interface", "ipv4", "add", "dnsservers",
+                              f"name={interface}", f"address={dns2}", "index=2", "validate=no"])
         if code != 0:
             return False, out2 or "failed: add dns2"
     return True, "OK"
 
 
 def windows_set_dhcp(interface: str) -> Tuple[bool, str]:
-    ok1, out1 = run_cmd([
-        "netsh", "interface", "ipv4", "set", "address", f"name={interface}", "source=dhcp"
-    ], encoding=None)
-    ok2, out2 = run_cmd([
-        "netsh", "interface", "ipv4", "set", "dnsservers", f"name={interface}", "source=dhcp"
-    ], encoding=None)
+    ok1, out1 = run_cmd(["netsh", "interface", "ipv4", "set", "address", f"name={interface}", "source=dhcp"])
+    ok2, out2 = run_cmd(["netsh", "interface", "ipv4", "set", "dnsservers", f"name={interface}", "source=dhcp"])
     if ok1 == 0 and ok2 == 0:
         return True, "OK"
     return False, (out1 or "") + "\n" + (out2 or "")
@@ -882,7 +861,7 @@ def run_cli(args):
 
 
 def build_arg_parser():
-    p = argparse.ArgumentParser(description="Socket Test Tool — 端口优雅关闭 + NIC + Ping")
+    p = argparse.ArgumentParser(description="Socket Test Tool + NIC + Ping")
     sub = p.add_subparsers(dest="mode")
 
     # server
