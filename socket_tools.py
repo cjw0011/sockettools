@@ -8,6 +8,7 @@ Socket Test Tool v1.3.0
 - Windows NIC config (static/DHCP)
 - Robust interface discovery via PowerShell JSON
 - UTF-8 enforced subprocess I/O (fix GBK decode errors)
+- Per-command encoding control (ping output on Chinese systems)
 - Friendly matching/logging: tolerate CR/LF differences, show UTF-8 preview
 - NEW: Ping module (GUI + CLI) with RTT stats
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import platform
+import locale
 import re
 import socket
 import struct
@@ -68,9 +70,10 @@ def is_windows() -> bool:
 # =========================
 # Subprocess helpers (UTF-8 enforced)
 # =========================
-def run_cmd(cmd: List[str], timeout: int = 30) -> Tuple[int, str]:
+def run_cmd(cmd: List[str], timeout: int = 30, encoding: str = "utf-8") -> Tuple[int, str]:
     """
-    统一子进程执行：强制按 UTF-8 解码，并容错，避免 GBK 相关报错。
+    统一子进程执行：默认按 UTF-8 解码，可指定其他编码。
+    通过 errors="replace" 容错，避免编码导致的异常。
     """
     try:
         p = subprocess.Popen(
@@ -78,7 +81,7 @@ def run_cmd(cmd: List[str], timeout: int = 30) -> Tuple[int, str]:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            encoding="utf-8",
+            encoding=encoding,
             errors="replace",
             shell=False,
         )
@@ -407,14 +410,16 @@ def ping_host(host: str, count: int = 4, timeout_ms: int = 1000, interval_ms: in
     sysname = platform.system().lower()
     if "windows" in sysname:
         cmd = ["ping", "-n", str(count), "-w", str(int(timeout_ms)), host]
+        encoding = locale.getpreferredencoding(False) or "utf-8"
         # Windows 无 -i 自定义间隔，默认 1s
     else:
         # -W 的单位多为秒；interval 不能太小（<0.2 一般需要 root）
         t_s = max(1, int(round(timeout_ms / 1000.0)))
         i_s = max(0.2, round(interval_ms / 1000.0, 2))
         cmd = ["ping", "-c", str(count), "-W", str(t_s), "-i", str(i_s), host]
+        encoding = "utf-8"
 
-    code, out = run_cmd(cmd, timeout=max(10, count * 5))
+    code, out = run_cmd(cmd, timeout=max(10, count * 5), encoding=encoding)
     if code != 0 and not out:
         return False, f"Ping 执行失败（{code}）。"
 
