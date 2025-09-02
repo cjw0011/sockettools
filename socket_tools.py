@@ -71,23 +71,44 @@ def is_windows() -> bool:
 # =========================
 def run_cmd(cmd: List[str], timeout: int = 30, encoding: Optional[str] = None) -> Tuple[int, str]:
     """
-    统一子进程执行：按指定编码解码，默认根据平台动态选择并容错，避免 GBK 相关报错。
+    统一子进程执行：按指定编码解码，默认根据平台动态选择并容错。
+    Windows 下根据当前代码页自动选择 UTF-8 或 OEM，以避免 netsh 等命令输出的
+    中文接口名在不同控制台编码下出现乱码。
     """
     if encoding is None:
         if is_windows():
-            encoding = locale.getpreferredencoding(False) or "oem"
+            try:
+                raw = subprocess.check_output(["chcp"], stderr=subprocess.STDOUT)
+                m = re.search(rb"(\d+)", raw)
+                codepage = int(m.group(1)) if m else 0
+                encoding = "utf-8" if codepage == 65001 else "oem"
+            except Exception:
+                encoding = "oem"
         else:
             encoding = "utf-8"
     try:
-        p = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding=encoding,
-            errors="replace",
-            shell=False,
-        )
+        try:
+            p = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding=encoding,
+                errors="replace",
+                shell=False,
+            )
+        except LookupError:
+            # 某些平台可能不支持 "oem"，回退到本地默认编码
+            fallback = locale.getpreferredencoding(False) if is_windows() else "utf-8"
+            p = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding=fallback,
+                errors="replace",
+                shell=False,
+            )
         out, _ = p.communicate(timeout=timeout)
         return p.returncode, (out or "").strip()
     except Exception as e:
