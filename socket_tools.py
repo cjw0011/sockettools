@@ -72,10 +72,6 @@ def is_windows() -> bool:
 def run_cmd(cmd: List[str], timeout: int = 30, encoding: Optional[str] = None) -> Tuple[int, str]:
     """
     统一子进程执行：按指定编码解码，默认根据平台动态选择并容错。
-    Windows 下改用 OEM 代码页以避免 netsh 等命令输出中文接口名时乱码。
-    """
-    if encoding is None:
-        encoding = "oem" if is_windows() else "utf-8"
     try:
         try:
             p = subprocess.Popen(
